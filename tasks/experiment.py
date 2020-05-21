@@ -30,6 +30,7 @@ def mask_expt_args(parser):
     expt_parser.add_argument('--n-parallel', default=1, type=int)
     expt_parser.add_argument('--only-test', action='store_true')
     expt_parser.add_argument('--mlflow', action='store_true')
+    expt_parser.add_argument('--notify-slack', action='store_true')
 
     return parser
 
@@ -67,7 +68,8 @@ class LoadDataSet(ManifestWaveDataSet):
 
     def __getitem__(self, idx):
         try:
-            x = torch.load(self.path_df.iloc[idx, 0].replace('.wav', '.pt'))
+            path = Path(self.path_df.iloc[idx, 0])
+            x = torch.load(str(path.parents[2] / 'processed' / path.name.replace('.wav', '.pt')))
         except FileNotFoundError as e:
             print(e)
             return super().__getitem__(idx)
@@ -80,8 +82,8 @@ class LoadDataSet(ManifestWaveDataSet):
 def parallel_logmel(expt_conf, load_func, label_func, phases):
     def parallel_preprocess(dataset, idx):
         processed, _ = dataset[idx]
-        path = dataset.path_df.iloc[idx, 0]
-        torch.save(processed.to('cpu'), str(Path('input/processed') / path.replace('.wav', '.pt')))
+        path = Path(dataset.path_df.iloc[idx, 0])
+        torch.save(processed.to('cpu'), str(path.parents[2] / 'processed' / path.name.replace('.wav', '.pt')))
 
     for phase in tqdm(phases):
         process_func = Preprocessor(expt_conf, phase).preprocess
@@ -97,7 +99,7 @@ def main(expt_conf, hyperparameters, typical_train_func):
         expt_conf['expt_id'] = dt.today().strftime('%Y-%m-%d_%H:%M')
 
     expt_dir = (Path(__file__).resolve().parents[1] / 'output' / f"{expt_conf['expt_id']}")
-    expt_dir.mkdir(exist_ok=True)
+    expt_dir.mkdir(exist_ok=True, parents=True)
 
     logging.basicConfig(level=logging.DEBUG, format="[%(name)s] [%(levelname)s] %(message)s",
                         filename=expt_dir / 'expt.log')
@@ -109,11 +111,14 @@ def main(expt_conf, hyperparameters, typical_train_func):
 
     expt_conf['sample_rate'] = 44100
 
-    # dataset_cls = LoadDataSet
-    dataset_cls = ManifestWaveDataSet
+    dataset_cls = LoadDataSet
+    # dataset_cls = ManifestWaveDataSet
     # wav_path = Path(expt_conf['manifest_path']).resolve().parents[1] / 'wav'
     # load_func = set_load_func(wav_path, expt_conf['sample_rate'], expt_conf['n_waves'])
 
+    expt_conf['transform'] = hyperparameters['transform'][0]
+    expt_conf['window_size'] = hyperparameters['window_size'][0]
+    expt_conf['window_stride'] = hyperparameters['window_stride'][0]
     # parallel_logmel(expt_conf, load_func, label_func, ['train', 'val'])
 
     patterns = list(itertools.product(*hyperparameters.values()))
@@ -234,8 +239,8 @@ if __name__ == '__main__':
             'model_type': ['logmel_cnn'],
             'transform': ['logmel'],
             # 'checkpoint_path': ['../cnn14.pth'],
-            'window_size': [0.03],
-            'window_stride': [0.02],
+            'window_size': [0.06],
+            'window_stride': [0.05],
             'epoch_rate': [0.05],
             'mixup_alpha': [0.0],
             'sample_balance': ['same'],
@@ -244,7 +249,7 @@ if __name__ == '__main__':
         }
     else:
         hyperparameters = {
-            'lr': [5e-5],
+            'lr': [1e-4],
             'batch_size': [16],
             'model_type': ['panns'],
             'transform': ['logmel'],
@@ -252,8 +257,8 @@ if __name__ == '__main__':
             'entropy_penalty': [0.0],
             'loss_func': ['ce'],
             'checkpoint_path': [None],
-            'window_size': [0.05],
-            'window_stride': [0.002],
+            'window_size': [0.1],
+            'window_stride': [0.05],
             'epoch_rate': [1.0],
             'mixup_alpha': [0.0],
             'sample_balance': ['same'],
